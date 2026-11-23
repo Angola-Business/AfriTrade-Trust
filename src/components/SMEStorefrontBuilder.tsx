@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Store,
@@ -14,7 +14,6 @@ import {
   ShieldCheck,
   TrendingUp,
   Edit3,
-  Sparkles,
   Save,
   Check,
   Eye,
@@ -53,6 +52,17 @@ export const SMEStorefrontBuilder: React.FC<SMEStorefrontBuilderProps> = ({
   const [phone, setPhone] = useState(myStore?.phone || '');
   const [whatsapp, setWhatsapp] = useState(myStore?.whatsappNumber || '');
   const [about, setAbout] = useState(myStore?.about || '');
+
+  useEffect(() => {
+    if (myStore) {
+      setName(myStore.name || '');
+      setTagline(myStore.tagline || '');
+      setCity(myStore.city || '');
+      setPhone(myStore.phone || '');
+      setWhatsapp(myStore.whatsappNumber || '');
+      setAbout(myStore.about || '');
+    }
+  }, [myStore?.id, myStore?.name, myStore?.tagline, myStore?.city, myStore?.phone, myStore?.whatsappNumber, myStore?.about]);
 
   // New Product Form State
   const [newProdName, setNewProdName] = useState('');
@@ -117,6 +127,7 @@ export const SMEStorefrontBuilder: React.FC<SMEStorefrontBuilderProps> = ({
       whatsappNumber: whatsapp,
       about,
     });
+    setLastSavedTime(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
     setActiveTab('preview');
   };
 
@@ -454,6 +465,26 @@ export const SMEStorefrontBuilder: React.FC<SMEStorefrontBuilderProps> = ({
                   className="w-full bg-neutral-900 text-white text-xs p-3 rounded-xl"
                 />
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-mono text-neutral-400 uppercase">Corporate Phone Line</label>
+              <input
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-neutral-900 text-white text-xs p-3 rounded-xl"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-mono text-neutral-400 uppercase">Company Overview</label>
+              <textarea
+                rows={3}
+                value={about}
+                onChange={(e) => setAbout(e.target.value)}
+                className="w-full bg-neutral-900 text-white text-xs p-3 rounded-xl"
+              />
             </div>
 
             <button

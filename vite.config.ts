@@ -13,6 +13,9 @@ export default defineConfig(() => {
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(
         process.env.VITE_SUPABASE_ANON_KEY || process.env.Supabase_anon_key || process.env.Supabase_publishable_key || process.env.SUPABASE_ANON_KEY || ''
       ),
+      'import.meta.env.VITE_GOOGLE_MAPS_API_KEY': JSON.stringify(
+        process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || ''
+      ),
     },
     plugins: [
       react(),
@@ -59,6 +62,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           runtimeCaching: [
             {

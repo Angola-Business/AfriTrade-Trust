@@ -2,19 +2,19 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
-  Sparkles,
   ShieldCheck,
   FileCheck2,
   RefreshCw,
   Globe,
-  ArrowRight,
-  TrendingUp,
-  Building2,
-  DollarSign,
+  Navigation,
+  ExternalLink,
+  MapPin,
 } from 'lucide-react';
 import { LanguageCode } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
-import { ALL_AFRICAN_COUNTRIES } from '../utils/africanCountries';
+import { ALL_AFRICAN_COUNTRIES, getAfricanCountryByName } from '../utils/africanCountries';
+import { getCountryCenter, triggerQuotaExceededEvent } from '../utils/africaCoordinates';
+import { AfricanTradeMap } from '../components/AfricanTradeMap';
 
 interface CrossBorderAdvisorPageProps {
   currentLang: LanguageCode;
@@ -31,32 +31,79 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
   const [productCategory, setProductCategory] = useState('Packaging & Containers');
   const [loading, setLoading] = useState(false);
   const [adviceData, setAdviceData] = useState<any>(null);
+  const [mapsLoading, setMapsLoading] = useState(false);
+  const [corridorHubs, setCorridorHubs] = useState<{
+    text: string;
+    mapsSources: Array<{ title: string; uri: string }>;
+  } | null>(null);
+
+  const originCountryObj = getAfricanCountryByName(supplierCountry);
+  const destCountryObj = getAfricanCountryByName(buyerCountry);
+  const originCenter = getCountryCenter(originCountryObj.code);
+  const destCenter = getCountryCenter(destCountryObj.code);
 
   const handleConsultAdvisor = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setLoading(true);
+    setMapsLoading(true);
+    setCorridorHubs(null);
 
     try {
-      const res = await fetch('/api/ai/trade-advisor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supplierCountry,
-          buyerCountry,
-          productCategory,
+      const [advisorRes, mapsRes] = await Promise.allSettled([
+        fetch('/api/ai/trade-advisor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            supplierCountry,
+            buyerCountry,
+            productCategory,
+          }),
         }),
-      });
+        fetch('/api/ai/maps-grounding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `Key commercial seaports, dry ports, and border customs stations connecting ${supplierCountry} and ${buyerCountry} for freight shipments`,
+            lat: (originCenter.lat + destCenter.lat) / 2,
+            lng: (originCenter.lng + destCenter.lng) / 2,
+          }),
+        }),
+      ]);
 
-      if (res.ok) {
-        const data = await res.json();
-        setAdviceData(data);
+      if (advisorRes.status === 'fulfilled' && advisorRes.value.ok) {
+        const raw = await advisorRes.value.json();
+        setAdviceData({
+          applicableAgreement: raw.applicableAgreement || raw.tradeAgreement || `${supplierCountry} - ${buyerCountry} AfCFTA Trade Protocol`,
+          tariffAdvantage: raw.tariffAdvantage || raw.tariffStatus || 'Eligible for preferential AfCFTA tariff treatment.',
+          requiredDocuments: Array.isArray(raw.requiredDocuments)
+            ? raw.requiredDocuments
+            : Array.isArray(raw.requiredDocs)
+            ? raw.requiredDocs
+            : [],
+          paymentSafetyAdvice: raw.paymentSafetyAdvice || raw.paymentRecommendation || 'Use PAPSS or Trade Escrow.',
+          logisticsNote: raw.logisticsNote || '',
+          groundingSources: Array.isArray(raw.groundingSources) ? raw.groundingSources : [],
+        });
       } else {
         fallbackAdvice();
+      }
+
+      if (mapsRes.status === 'fulfilled') {
+        if (mapsRes.value.status === 429) {
+          triggerQuotaExceededEvent();
+        } else if (mapsRes.value.ok) {
+          const mapsData = await mapsRes.value.json();
+          setCorridorHubs({
+            text: mapsData.text || '',
+            mapsSources: Array.isArray(mapsData.mapsSources) ? mapsData.mapsSources : [],
+          });
+        }
       }
     } catch {
       fallbackAdvice();
     } finally {
       setLoading(false);
+      setMapsLoading(false);
     }
   };
 
@@ -71,7 +118,8 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
         'Phytosanitary / Quality Conformity Inspection Certificate',
       ],
       paymentSafetyAdvice: 'Utilize Pan-African Payment and Settlement System (PAPSS) in local currency or verified Letter of Credit with milestone release upon port clearance.',
-      estimatedTransitDays: 5,
+      logisticsNote: `Cross-border commercial freight operating between ${originCenter.hubCity} and ${destCenter.hubCity}.`,
+      groundingSources: [],
     });
   };
 
@@ -93,7 +141,7 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
       {/* Hero Header */}
       <div className="bg-neutral-950 rounded-2xl p-6 sm:p-8 space-y-3">
         <div className="w-10 h-10 rounded-xl bg-white text-black flex items-center justify-center">
-          <Sparkles className="w-5 h-5" />
+          <Globe className="w-5 h-5" />
         </div>
         <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
           {t.advisorDesc}
@@ -157,12 +205,36 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
             </>
           ) : (
             <>
-              <Sparkles className="w-4 h-4" />
+              <Navigation className="w-4 h-4" />
               <span>{t.calculateFeasibility}</span>
             </>
           )}
         </button>
       </form>
+
+      {/* Interactive Corridor Route Map */}
+      <div className="bg-neutral-950 rounded-2xl p-5 sm:p-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-mono uppercase text-neutral-400">
+            <MapPin className="w-4 h-4 text-white" />
+            <span>Live Corridor Route Visualization</span>
+          </div>
+          <span className="text-[11px] font-mono text-neutral-400">
+            {originCenter.hubCity} → {destCenter.hubCity}
+          </span>
+        </div>
+        <AfricanTradeMap
+          heightClassName="h-[320px]"
+          corridor={{
+            originLat: originCenter.lat,
+            originLng: originCenter.lng,
+            originLabel: `${originCenter.hubCity}, ${supplierCountry}`,
+            destLat: destCenter.lat,
+            destLng: destCenter.lng,
+            destLabel: `${destCenter.hubCity}, ${buyerCountry}`,
+          }}
+        />
+      </div>
 
       {/* Results Dossier */}
       {adviceData && (
@@ -200,7 +272,7 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
               <span>{t.customsDocs}</span>
             </div>
             <div className="space-y-2">
-              {adviceData.requiredDocuments.map((doc: string, idx: number) => (
+              {(adviceData.requiredDocuments || []).map((doc: string, idx: number) => (
                 <div key={idx} className="bg-neutral-900/60 p-3 rounded-xl flex items-center gap-3">
                   <span className="w-5 h-5 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shrink-0">
                     {idx + 1}
@@ -215,6 +287,73 @@ export const CrossBorderAdvisorPage: React.FC<CrossBorderAdvisorPageProps> = ({
             <span className="text-[10px] font-mono uppercase text-neutral-400">{t.paymentSecurity}</span>
             <p className="text-xs text-neutral-300 leading-relaxed">{adviceData.paymentSafetyAdvice}</p>
           </div>
+
+          {adviceData.logisticsNote && (
+            <div className="bg-neutral-900/70 p-4 rounded-xl space-y-1.5">
+              <span className="text-[10px] font-mono uppercase text-neutral-400">Corridor Brief</span>
+              <p className="text-xs text-neutral-300 leading-relaxed">{adviceData.logisticsNote}</p>
+            </div>
+          )}
+
+          {/* Search Grounding Sources */}
+          {Array.isArray(adviceData.groundingSources) && adviceData.groundingSources.length > 0 && (
+            <div className="bg-black/60 border border-neutral-800 p-4 rounded-xl space-y-2">
+              <span className="text-[10px] font-mono uppercase text-neutral-400 block">
+                Verified Trade References (Google Search Grounding)
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {adviceData.groundingSources.slice(0, 6).map((src: any, i: number) => (
+                  <a
+                    key={i}
+                    href={src.uri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-[11px] text-emerald-300 hover:underline transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                    <span className="truncate max-w-[240px]">{src.title}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Maps Grounding Hubs */}
+          {(mapsLoading || corridorHubs) && (
+            <div className="bg-black/60 border border-neutral-800 p-4 rounded-xl space-y-2.5">
+              <span className="text-[10px] font-mono uppercase text-neutral-400 block">
+                Ports, Dry Ports & Border Hubs (Google Maps)
+              </span>
+              {mapsLoading ? (
+                <p className="text-xs text-neutral-400 font-mono">Loading corridor infrastructure hubs...</p>
+              ) : (
+                <>
+                  {corridorHubs?.text && (
+                    <p className="text-xs text-neutral-300 leading-relaxed whitespace-pre-line">
+                      {corridorHubs.text}
+                    </p>
+                  )}
+                  {corridorHubs?.mapsSources && corridorHubs.mapsSources.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {corridorHubs.mapsSources.map((src, i) => (
+                        <a
+                          key={i}
+                          href={src.uri}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-[11px] text-white hover:underline transition-colors"
+                        >
+                          <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>{src.title}</span>
+                          <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </motion.div>
       )}
     </motion.div>

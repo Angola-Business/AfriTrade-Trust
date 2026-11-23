@@ -456,10 +456,10 @@ export const SuperAdminPortalPage: React.FC<SuperAdminPortalPageProps> = ({
           if (Array.isArray(parsed.data.users)) onUpdateUsers(parsed.data.users);
           showToast('Platform data imported successfully');
         } else {
-          alert('Invalid backup file format');
+          showToast('Invalid backup file format');
         }
       } catch (err) {
-        alert('Failed to parse backup JSON file');
+        showToast('Failed to parse backup JSON file');
       }
     };
     reader.readAsText(file);
@@ -1912,11 +1912,11 @@ export const SuperAdminPortalPage: React.FC<SuperAdminPortalPageProps> = ({
               </div>
             )}
 
-            {/* Credential Status Badges */}
+            {/* Infrastructure Status Badges */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 text-xs">
               <div className="p-3 bg-black rounded-xl border border-neutral-800/80 space-y-1">
                 <div className="flex items-center justify-between text-neutral-400 font-mono text-[10px]">
-                  <span>SUPABASE REALTIME</span>
+                  <span>CLOUD REALTIME</span>
                   <span className="text-emerald-400">● ACTIVE</span>
                 </div>
                 <div className="text-white font-bold truncate font-mono text-[11px]">
@@ -1927,35 +1927,35 @@ export const SuperAdminPortalPage: React.FC<SuperAdminPortalPageProps> = ({
 
               <div className="p-3 bg-black rounded-xl border border-neutral-800/80 space-y-1">
                 <div className="flex items-center justify-between text-neutral-400 font-mono text-[10px]">
-                  <span>OPENROUTER API</span>
-                  <span className="text-emerald-400">● ROTATED ($100)</span>
+                  <span>TRADE DISCOVERY</span>
+                  <span className="text-emerald-400">● ACTIVE</span>
                 </div>
                 <div className="text-white font-bold font-mono text-[11px]">
-                  Multi-Model Gateway
+                  Smart Search & Match
                 </div>
-                <p className="text-[10px] text-neutral-500">AI search & fallback routing</p>
+                <p className="text-[10px] text-neutral-500">Multilingual catalog indexing</p>
               </div>
 
               <div className="p-3 bg-black rounded-xl border border-neutral-800/80 space-y-1">
                 <div className="flex items-center justify-between text-neutral-400 font-mono text-[10px]">
-                  <span>OPENAI GATEWAY</span>
-                  <span className="text-emerald-400">● CONFIGURED</span>
+                  <span>AFCFTA COMPLIANCE</span>
+                  <span className="text-emerald-400">● VERIFIED</span>
                 </div>
                 <div className="text-white font-bold font-mono text-[11px]">
-                  GPT-4o / Mini Pool
+                  54 African Registries
                 </div>
-                <p className="text-[10px] text-neutral-500">127 catalog models available</p>
+                <p className="text-[10px] text-neutral-500">Continental corridor rule engine</p>
               </div>
 
               <div className="p-3 bg-black rounded-xl border border-neutral-800/80 space-y-1">
                 <div className="flex items-center justify-between text-neutral-400 font-mono text-[10px]">
-                  <span>GEMINI AI ENGINE</span>
+                  <span>CORRIDOR MAPPING</span>
                   <span className="text-emerald-400">● PRIMARY</span>
                 </div>
                 <div className="text-white font-bold font-mono text-[11px]">
-                  Gemini 3.8 Flash
+                  Google Maps Platform
                 </div>
-                <p className="text-[10px] text-neutral-500">AfCFTA trade analysis & matcher</p>
+                <p className="text-[10px] text-neutral-500">Verified GPS & trade routes</p>
               </div>
             </div>
           </div>

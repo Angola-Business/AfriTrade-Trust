@@ -12,8 +12,6 @@ import {
   Image as ImageIcon,
   Camera,
   X,
-  Sparkles,
-  Key,
   Copy,
   AlertTriangle,
   Lock,
@@ -21,6 +19,8 @@ import {
 import { BusinessListing, BusinessType, LanguageCode } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
 import { ALL_AFRICAN_COUNTRIES, getAfricanCountryByName } from '../utils/africanCountries';
+import { PlacesAddressPicker } from '../components/PlacesAddressPicker';
+import { getCountryCenter } from '../utils/africaCoordinates';
 
 interface ListBusinessPageProps {
   onAddBusiness: (newBiz: BusinessListing) => void;
@@ -39,6 +39,7 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
   const [country, setCountry] = useState('Angola');
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
+  const [gpsCoordinates, setGpsCoordinates] = useState<{ lat: number; lng: number } | undefined>(undefined);
   const [businessType, setBusinessType] = useState<BusinessType>('manufacturer');
   const [industry, setIndustry] = useState('Packaging & Containers');
   const [regNumber, setRegNumber] = useState('');
@@ -61,11 +62,12 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
   const logoFileInputRef = useRef<HTMLInputElement>(null);
   const coverFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Security PIN / One-Time View State
+  // Security PIN / One-Time View & Inline Error State
   const [submitted, setSubmitted] = useState(false);
   const [generatedSecurityPin, setGeneratedSecurityPin] = useState<string>('');
   const [copiedPin, setCopiedPin] = useState(false);
   const [acknowledgedPinSaved, setAcknowledgedPinSaved] = useState(false);
+  const [formNotice, setFormNotice] = useState<string | null>(null);
 
   const selectedCountryData = getAfricanCountryByName(country);
 
@@ -74,10 +76,11 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file (PNG, JPG, WebP, SVG).');
+      setFormNotice('Please select an image file (PNG, JPG, WebP, SVG).');
       return;
     }
 
+    setFormNotice(null);
     setLogoFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
@@ -93,10 +96,11 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file (PNG, JPG, WebP).');
+      setFormNotice('Please select an image file (PNG, JPG, WebP).');
       return;
     }
 
+    setFormNotice(null);
     setCoverFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
@@ -125,7 +129,8 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
       country: selectedCountryData.name,
       countryCode: selectedCountryData.code,
       city: city || `${selectedCountryData.name} Commercial Hub`,
-      address: address || `${city}, ${selectedCountryData.name}`,
+      address: address || `${city || selectedCountryData.name}, ${selectedCountryData.name}`,
+      gpsCoordinates: gpsCoordinates || getCountryCenter(selectedCountryData.code),
       primaryLanguage: selectedCountryData.primaryLang,
       supportedLanguages: ['en', selectedCountryData.primaryLang],
       businessType,
@@ -311,13 +316,20 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
             </div>
           </div>
 
+          {formNotice && (
+            <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-700/40 text-amber-200 text-xs text-center">
+              {formNotice}
+            </div>
+          )}
+
           <div className="pt-2 flex flex-col sm:flex-row justify-center gap-3">
             <button
               onClick={() => {
                 if (!acknowledgedPinSaved && !copiedPin) {
-                  alert('Please copy your Security PIN and confirm you have saved it in a safe folder.');
+                  setFormNotice('Please copy your Security PIN and confirm you have saved it in a safe folder.');
                   return;
                 }
+                setFormNotice(null);
                 onNavigate('explore');
               }}
               className="bg-white text-black hover:bg-neutral-200 text-xs font-bold px-6 py-3 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-lg"
@@ -328,9 +340,10 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
             <button
               onClick={() => {
                 if (!acknowledgedPinSaved && !copiedPin) {
-                  alert('Please copy your Security PIN and confirm you have saved it in a safe folder.');
+                  setFormNotice('Please copy your Security PIN and confirm you have saved it in a safe folder.');
                   return;
                 }
+                setFormNotice(null);
                 onNavigate('sme-hub');
               }}
               className="bg-neutral-900 text-white hover:bg-neutral-800 text-xs font-semibold px-6 py-3 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 border border-neutral-800"
@@ -441,6 +454,23 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
               </div>
 
               <div>
+                <label className="block text-neutral-400 mb-1">Industry Sector *</label>
+                <select
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
+                  className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white cursor-pointer"
+                >
+                  <option value="Packaging & Containers">Packaging & Containers</option>
+                  <option value="Agro-Processing & Commodities">Agro-Processing & Commodities</option>
+                  <option value="Renewable Energy & Solar">Renewable Energy & Solar</option>
+                  <option value="Industrial & Construction Materials">Industrial & Construction Materials</option>
+                  <option value="Textiles & Apparel">Textiles & Apparel</option>
+                  <option value="Medical & Pharmaceuticals">Medical & Pharmaceuticals</option>
+                  <option value="Logistics & Cold Chain">Logistics & Cold Chain</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-neutral-400 mb-1">WhatsApp Commercial Number *</label>
                 <input
                   type="text"
@@ -449,6 +479,21 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
                   onChange={(e) => setWhatsapp(e.target.value)}
                   placeholder="+244 923 000 000"
                   className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white font-mono"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-neutral-400 mb-1">Verified Facility Address & Map Coordinates</label>
+                <PlacesAddressPicker
+                  value={address}
+                  countryCode={selectedCountryData.code}
+                  countryName={selectedCountryData.name}
+                  onChange={setAddress}
+                  onSelectResolved={(res) => {
+                    setAddress(res.address);
+                    if (res.city && !city) setCity(res.city);
+                    setGpsCoordinates({ lat: res.lat, lng: res.lng });
+                  }}
                 />
               </div>
 
@@ -463,13 +508,13 @@ export const ListBusinessPage: React.FC<ListBusinessPageProps> = ({
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
                 <label className="block text-neutral-400 mb-1">Tagline / Brief Specialization</label>
                 <input
                   type="text"
                   value={tagline}
                   onChange={(e) => setTagline(e.target.value)}
-                  placeholder="e.g. Corrugated packaging & food-grade plastic containers for regional export"
+                  placeholder="e.g. Corrugated packaging & food-grade containers"
                   className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white"
                 />
               </div>

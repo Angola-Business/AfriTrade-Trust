@@ -6,7 +6,7 @@ import {
   FileText,
   ShieldCheck,
   CheckCircle2,
-  Sparkles,
+  Award,
   Building2,
   Coins,
   Clock,
@@ -145,7 +145,7 @@ export const SubmitQuotePage: React.FC<SubmitQuotePageProps> = ({
               className="space-y-2 relative z-10"
             >
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-900 text-neutral-300 font-mono text-[11px] font-semibold">
-                <Sparkles className="w-3.5 h-3.5 text-white" />
+                <Award className="w-3.5 h-3.5 text-white" />
                 <span>Pan-African Verified Bid Logged</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">

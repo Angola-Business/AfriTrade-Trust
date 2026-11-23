@@ -10,7 +10,7 @@ import {
   Building2,
   LogIn,
   LogOut,
-  Sparkles,
+  Compass,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -75,7 +75,7 @@ export const SideCenterMenu: React.FC<SideCenterMenuProps> = ({
     { id: 'sme-hub', label: t.navStorefront, icon: Store, requiresAuth: true },
     { id: 'resources', label: t.navResources, icon: BookOpen, requiresAuth: true },
     { id: 'trust', label: t.navTrustHub, icon: ShieldCheck, requiresAuth: true },
-    { id: 'trade-advisor', label: t.navTradeAdvisor, icon: Sparkles, requiresAuth: true },
+    { id: 'trade-advisor', label: t.navTradeAdvisor, icon: Compass, requiresAuth: true },
     { id: 'list-business', label: t.navListBusiness, icon: Building2, requiresAuth: false },
     currentUser
       ? { id: 'sign-out', label: t.navSignOut, icon: LogOut, isAction: true, requiresAuth: false }

@@ -6,7 +6,6 @@ import {
   Package,
   MapPin,
   CheckCircle2,
-  Sparkles,
   Building2,
   Coins,
   ShieldCheck,
@@ -147,7 +146,7 @@ export const PostRFQPage: React.FC<PostRFQPageProps> = ({
               className="space-y-2 relative z-10"
             >
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-900 text-neutral-300 font-mono text-[11px] font-semibold">
-                <Sparkles className="w-3.5 h-3.5 text-white" />
+                <ShieldCheck className="w-3.5 h-3.5 text-white" />
                 <span>Pan-African Tender Network</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
@@ -252,16 +251,34 @@ export const PostRFQPage: React.FC<PostRFQPageProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="bg-neutral-950 rounded-2xl p-6 sm:p-8 space-y-4 text-xs shadow-xl">
-              <div>
-                <label className="block text-neutral-400 mb-1">{t.productRequirement}</label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. 15,000 Food-grade corrugated cartons for fish export"
-                  className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-neutral-400 mb-1">{t.productRequirement}</label>
+                  <input
+                    type="text"
+                    required
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. 15,000 Food-grade corrugated cartons for fish export"
+                    className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-400 mb-1">Sector / Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full bg-black text-white px-3.5 py-2.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-white cursor-pointer"
+                  >
+                    <option value="Packaging & Containers">Packaging & Containers</option>
+                    <option value="Agro-Processing & Commodities">Agro-Processing & Commodities</option>
+                    <option value="Renewable Energy & Solar">Renewable Energy & Solar</option>
+                    <option value="Industrial & Construction Materials">Industrial & Construction Materials</option>
+                    <option value="Textiles & Apparel">Textiles & Apparel</option>
+                    <option value="Medical & Pharmaceuticals">Medical & Pharmaceuticals</option>
+                    <option value="Logistics & Cold Chain">Logistics & Cold Chain</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

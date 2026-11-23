@@ -17,7 +17,6 @@ import {
   FileCheck2,
   Share2,
   Send,
-  Sparkles,
   Copy,
   Check,
   Edit3,
@@ -28,11 +27,15 @@ import {
   Star,
   Bookmark,
   Award,
+  ExternalLink,
+  Navigation,
 } from 'lucide-react';
 import { BusinessListing, LanguageCode, CurrencyCode, VerificationTier, ProductItem, BusinessReview } from '../types';
 import { formatPrice } from '../utils/currency';
 import { calculateRealtimeTrustScore, getDefaultReviewsForBusiness } from '../utils/trustScore';
 import { TRANSLATIONS } from '../i18n/translations';
+import { AfricanTradeMap } from '../components/AfricanTradeMap';
+import { getCountryCenter, triggerQuotaExceededEvent } from '../utils/africaCoordinates';
 
 interface BusinessDetailPageProps {
   business: BusinessListing;
@@ -103,6 +106,40 @@ export const BusinessDetailPage: React.FC<BusinessDetailPageProps> = ({
   const [inquiryMessage, setInquiryMessage] = useState(
     `Hello sales team at ${business.name},\n\nI reviewed your verified supplier profile on AfriTrade Trust. We are interested in sourcing ${business.products[0]?.name || business.industry} for delivery to ${business.city}.\n\nPlease share your wholesale quotation, MOQ, and AfCFTA export lead time.\n\nBest regards,\nProcurement Team`
   );
+  const [mapsInsightsLoading, setMapsInsightsLoading] = useState(false);
+  const [mapsInsights, setMapsInsights] = useState<{
+    text: string;
+    mapsSources: Array<{ title: string; uri: string }>;
+  } | null>(null);
+
+  const handleLoadNearbyInfrastructure = async () => {
+    setMapsInsightsLoading(true);
+    const coords = business.gpsCoordinates || getCountryCenter(business.countryCode);
+    try {
+      const res = await fetch('/api/ai/maps-grounding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `Commercial ports, cargo terminals, customs clearance hubs, and industrial logistics parks near ${business.city}, ${business.country}`,
+          lat: coords.lat,
+          lng: coords.lng,
+        }),
+      });
+      if (res.status === 429) {
+        triggerQuotaExceededEvent();
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setMapsInsights({
+          text: data.text || '',
+          mapsSources: Array.isArray(data.mapsSources) ? data.mapsSources : [],
+        });
+      }
+    } finally {
+      setMapsInsightsLoading(false);
+    }
+  };
 
   const activeReviews = business.reviews && business.reviews.length > 0
     ? business.reviews
@@ -479,6 +516,60 @@ export const BusinessDetailPage: React.FC<BusinessDetailPageProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Interactive Verified Location Map & Trade Infrastructure Lookup */}
+          <div className="bg-neutral-950 rounded-2xl p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono text-neutral-400">
+                  Verified Operating Location
+                </h3>
+                <p className="text-xs text-neutral-400 mt-0.5 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>{business.address || `${business.city}, ${business.country}`}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleLoadNearbyInfrastructure}
+                disabled={mapsInsightsLoading}
+                className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shrink-0"
+              >
+                <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{mapsInsightsLoading ? 'Loading Ports & Hubs...' : 'Nearby Freight & Port Hubs'}</span>
+              </button>
+            </div>
+
+            <AfricanTradeMap focusedBusiness={business} heightClassName="h-[300px]" />
+
+            {mapsInsights && (
+              <div className="p-4 rounded-xl bg-black border border-neutral-800 space-y-2.5 text-xs">
+                <span className="text-[10px] font-mono uppercase text-neutral-400 block">
+                  Nearby Trade Infrastructure (Google Maps)
+                </span>
+                {mapsInsights.text && (
+                  <p className="text-neutral-300 leading-relaxed whitespace-pre-line">{mapsInsights.text}</p>
+                )}
+                {mapsInsights.mapsSources.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {mapsInsights.mapsSources.map((src, i) => (
+                      <a
+                        key={i}
+                        href={src.uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-[11px] text-white hover:underline transition-colors"
+                      >
+                        <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <span>{src.title}</span>
+                        <ExternalLink className="w-2.5 h-2.5 text-neutral-400" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

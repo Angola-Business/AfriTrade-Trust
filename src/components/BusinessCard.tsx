@@ -669,7 +669,7 @@ export const BusinessCard: React.FC<BusinessCardProps> = ({
             </p>
           </div>
 
-          {/* AI Match Context (If active) */}
+          {/* Match Context */}
           {aiMatchReason && (
             <div className="p-3 rounded-xl bg-neutral-900 text-[11px] text-neutral-300 space-y-0.5">
               <span className="text-white font-bold block uppercase text-[10px]">{t.matchInsight}</span>

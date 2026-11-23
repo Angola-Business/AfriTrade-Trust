@@ -43,7 +43,12 @@ import {
   insertReviewToSupabase,
   insertReportToSupabase,
   syncBusinessesToSupabase,
+  deleteBusinessFromSupabase,
+  deleteRFQFromSupabase,
+  deleteQuotationFromSupabase,
+  deletePlatformUserFromSupabase,
 } from './utils/supabaseClient';
+import { AfricanTradeMap } from './components/AfricanTradeMap';
 
 // Webpages (Transformed from all modals into dedicated full webpages)
 import { EnterDirectoryPage } from './pages/EnterDirectoryPage';
@@ -68,7 +73,9 @@ import {
   LogIn,
   Bookmark,
   PlusCircle,
-  Sparkles,
+  LayoutGrid,
+  MapPin,
+  AlertTriangle,
 } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'motion/react';
@@ -118,6 +125,17 @@ export default function App() {
 
   const [currentCurrency, setCurrentCurrency] = useState<CurrencyCode>('USD');
   const [lowDataMode, setLowDataMode] = useState<boolean>(false);
+
+  // Google Maps Demo Key Quota Exceeded State
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState<boolean>(false);
+  useEffect(() => {
+    const handler = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handler);
+    return () => window.removeEventListener('gmp-quota-exceeded', handler);
+  }, []);
+
+  // Directory Display Mode ('grid' | 'map')
+  const [directoryViewMode, setDirectoryViewMode] = useState<'grid' | 'map'>('grid');
 
   // Webpage Navigation State
   const [activeTab, setActiveTab] = useState<string>('explore');
@@ -577,13 +595,23 @@ export default function App() {
   }, [businesses, searchQuery, aiMatchMap, filterCountry, filterType, filterVerifiedOnly, filterAfcftaOnly]);
 
   const handleTrackWhatsAppClick = (businessId: string) => {
+    let updatedTarget: BusinessListing | null = null;
     setBusinesses((prev) =>
-      prev.map((b) =>
-        b.id === businessId
-          ? { ...b, whatsappClicksCount: b.whatsappClicksCount + 1 }
-          : b
-      )
+      prev.map((b) => {
+        if (b.id === businessId) {
+          updatedTarget = { ...b, whatsappClicksCount: b.whatsappClicksCount + 1 };
+          return updatedTarget;
+        }
+        return b;
+      })
     );
+    if (selectedBusiness?.id === businessId && updatedTarget) {
+      setSelectedBusiness(updatedTarget);
+    }
+    if (updatedTarget) {
+      upsertBusinessToSupabase(updatedTarget).catch(console.warn);
+      broadcastRealtimeUpdate('BUSINESS_UPDATED', updatedTarget);
+    }
   };
 
   const handlePostNewRFQ = (newRfq: Partial<SourcingRequest>) => {
@@ -634,13 +662,19 @@ export default function App() {
     setQuotations([fullQuote, ...quotations]);
     upsertQuotationToSupabase(fullQuote).catch(console.warn);
     broadcastRealtimeUpdate('QUOTE_SUBMITTED', fullQuote);
+    let updatedRfqTarget: SourcingRequest | null = null;
     setSourcingRequests((prev) =>
-      prev.map((r) =>
-        r.id === fullQuote.rfqId
-          ? { ...r, quotationsReceivedCount: (r.quotationsReceivedCount || 0) + 1 }
-          : r
-      )
+      prev.map((r) => {
+        if (r.id === fullQuote.rfqId) {
+          updatedRfqTarget = { ...r, quotationsReceivedCount: (r.quotationsReceivedCount || 0) + 1 };
+          return updatedRfqTarget;
+        }
+        return r;
+      })
     );
+    if (updatedRfqTarget) {
+      upsertRFQToSupabase(updatedRfqTarget).catch(console.warn);
+    }
   };
 
   const handleAddNewBusiness = (newBiz: BusinessListing, targetTab?: string) => {
@@ -710,7 +744,14 @@ export default function App() {
 
   const handleDirectWhatsAppText = (phone: string, text: string) => {
     const clean = phone.replace(/[^0-9]/g, '');
-    window.open(`https://wa.me/${clean}?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    const url = `https://wa.me/${clean}?text=${encodeURIComponent(text)}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Navigation Helpers to Webpages
@@ -761,6 +802,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-neutral-100 font-sans selection:bg-white selection:text-black relative pb-12">
+      {/* Demo Key Quota Exceeded Banner */}
+      {gmpQuotaExceeded && (
+        <div className="sticky top-0 z-50 bg-amber-950/95 border-b border-amber-700/60 backdrop-blur-md px-4 py-2.5 text-xs text-amber-100 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Google Maps demo quota exceeded. To lift daily limits, upgrade to your own Google Cloud billing key.
+            </span>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1 rounded-lg bg-amber-400 text-black font-bold hover:bg-amber-300 transition-colors"
+            >
+              Upgrade Key Guide
+            </a>
+            <button
+              type="button"
+              onClick={() => setGmpQuotaExceeded(false)}
+              className="text-amber-300 hover:text-white cursor-pointer"
+              aria-label="Dismiss quota banner"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Motion Graphics Objects & Background */}
       <MotionBackground />
 
@@ -918,7 +989,30 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex items-center bg-neutral-900 rounded-xl p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDirectoryViewMode('grid')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                      directoryViewMode === 'grid' ? 'bg-white text-black' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDirectoryViewMode('map')}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                      directoryViewMode === 'map' ? 'bg-white text-black' : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Map</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -937,15 +1031,32 @@ export default function App() {
               </div>
             </div>
 
-            {/* Businesses Grid */}
-            {businesses.length === 0 ? (
+            {/* Businesses Grid or Interactive Trade Map */}
+            {directoryViewMode === 'map' ? (
+              <div className="bg-neutral-950 rounded-3xl p-4 sm:p-6 space-y-4 shadow-2xl border border-neutral-900">
+                <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-white font-bold">
+                    <MapPin className="w-4 h-4 text-emerald-400" />
+                    <span>Pan-African Verified Supplier Map ({displayedBusinesses.length})</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-neutral-400">
+                    Click any marker pin to inspect supplier credentials & launch WhatsApp
+                  </span>
+                </div>
+                <AfricanTradeMap
+                  businesses={displayedBusinesses}
+                  onSelectBusiness={openBusinessDetailWebpage}
+                  heightClassName="h-[460px]"
+                />
+              </div>
+            ) : businesses.length === 0 ? (
               <div className="p-8 sm:p-12 text-center bg-neutral-950 rounded-3xl space-y-6 shadow-2xl border border-neutral-900">
                 <div className="w-16 h-16 rounded-2xl bg-white text-black flex items-center justify-center mx-auto shadow-xl">
                   <Building2 className="w-8 h-8" />
                 </div>
                 <div className="space-y-2 max-w-lg mx-auto">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-900 text-neutral-300 font-mono text-[11px] font-semibold">
-                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                    <Building2 className="w-3.5 h-3.5 text-white" />
                     <span>DIRECTORY DASHBOARD · 0 BUSINESSES</span>
                   </div>
                   <h3 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
@@ -1241,6 +1352,35 @@ export default function App() {
             currentUser={currentUser}
             currentLang={currentLang}
             onSignOut={handleSignOut}
+            onAddBusiness={(newBiz) => handleAddNewBusiness(newBiz)}
+            onSyncUserRecord={(userRec) => {
+              const userAccount: PlatformUserAccount = {
+                id: `usr-${userRec.role}-${Date.now()}`,
+                name: userRec.name,
+                email: userRec.email || `${userRec.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@enterprise.africa`,
+                phone: userRec.phone || '+244 923 000 000',
+                role: userRec.role,
+                status: 'active',
+                country: userRec.country || 'Angola',
+                businessId: userRec.businessId,
+                createdAt: new Date().toISOString(),
+                lastLoginAt: new Date().toISOString(),
+              };
+              setPlatformUsers((prev) => {
+                const exists = prev.some(
+                  (u) => u.email.toLowerCase() === userAccount.email.toLowerCase()
+                );
+                if (exists) {
+                  return prev.map((u) =>
+                    u.email.toLowerCase() === userAccount.email.toLowerCase()
+                      ? { ...u, lastLoginAt: new Date().toISOString() }
+                      : u
+                  );
+                }
+                return [userAccount, ...prev];
+              });
+              upsertPlatformUserToSupabase(userAccount).catch(console.warn);
+            }}
             onLoginSuccess={(role, business, name) => {
               const sessionData = { role, business, name };
               setCurrentUser(sessionData);
@@ -1400,11 +1540,15 @@ export default function App() {
             reports={suspiciousReports}
             users={platformUsers}
             onUpdateBusinesses={(list) => {
+              const removedIds = businesses.filter((oldItem) => !list.some((n) => n.id === oldItem.id));
+              removedIds.forEach((oldItem) => deleteBusinessFromSupabase(oldItem.id).catch(console.warn));
               setBusinesses(list);
               syncBusinessesToSupabase(list).catch(console.warn);
               broadcastRealtimeUpdate('BUSINESS_UPDATED');
             }}
             onUpdateSourcingRequests={(rfqList) => {
+              const removedIds = sourcingRequests.filter((oldItem) => !rfqList.some((n) => n.id === oldItem.id));
+              removedIds.forEach((oldItem) => deleteRFQFromSupabase(oldItem.id).catch(console.warn));
               setSourcingRequests(rfqList);
               for (const rfq of rfqList) {
                 upsertRFQToSupabase(rfq).catch(console.warn);
@@ -1412,6 +1556,8 @@ export default function App() {
               broadcastRealtimeUpdate('RFQ_POSTED');
             }}
             onUpdateQuotations={(quoteList) => {
+              const removedIds = quotations.filter((oldItem) => !quoteList.some((n) => n.id === oldItem.id));
+              removedIds.forEach((oldItem) => deleteQuotationFromSupabase(oldItem.id).catch(console.warn));
               setQuotations(quoteList);
               for (const q of quoteList) {
                 upsertQuotationToSupabase(q).catch(console.warn);
@@ -1422,6 +1568,8 @@ export default function App() {
               setSuspiciousReports(repList);
             }}
             onUpdateUsers={(userList) => {
+              const removedIds = platformUsers.filter((oldItem) => !userList.some((n) => n.id === oldItem.id));
+              removedIds.forEach((oldItem) => deletePlatformUserFromSupabase(oldItem.id).catch(console.warn));
               setPlatformUsers(userList);
               for (const u of userList) {
                 upsertPlatformUserToSupabase(u).catch(console.warn);
@@ -1455,12 +1603,12 @@ export default function App() {
         <p>
           {t.poweredBy}{' '}
           <a
-            href="https://www.afritradeos.co.za"
+            href="https://afritradeos.co.za"
             target="_blank"
             rel="noopener noreferrer"
             className="text-neutral-300 hover:text-white underline underline-offset-4 transition-colors font-medium"
           >
-            www.afritradeos.co.za
+            afritradeos.co.za
           </a>
         </p>
       </footer>

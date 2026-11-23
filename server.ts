@@ -14,12 +14,12 @@ const app = express();
 const httpServer = http.createServer(app);
 app.use(express.json());
 
-
 const geminiKey = process.env.GEMINI_API_KEY;
 const openrouterKey = process.env.Openrouter_api || process.env.OPENROUTER_API_KEY;
 const openAIKey = process.env.OpenAI_key || process.env.OPENAI_API_KEY;
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.Supabase_project_url || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.Supabase_anon_key || process.env.Supabase_publishable_key || process.env.SUPABASE_ANON_KEY || '';
+const mapsApiKey = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
 
 const ai = geminiKey
   ? new GoogleGenAI({
@@ -32,21 +32,22 @@ const ai = geminiKey
     })
   : null;
 
-// Health check endpoint with real-time status of all rotated credentials
+// Health check endpoint
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     hasGeminiKey: Boolean(geminiKey),
     hasSupabase: Boolean(supabaseUrl && supabaseAnonKey),
+    hasGoogleMaps: Boolean(mapsApiKey),
     hasOpenRouter: Boolean(openrouterKey),
     hasOpenAI: Boolean(openAIKey),
     supabaseUrl: supabaseUrl ? supabaseUrl.replace(/https:\/\/(.{4}).*(\..*)/, 'https://$1***$2') : null,
     timestamp: new Date().toISOString(),
-    version: '2.1.0-realtime',
+    version: '2.2.0-realtime',
   });
 });
 
-// Supabase Real-time configuration endpoint for frontend client
+// Cloud Real-time configuration endpoint for frontend client
 app.get('/api/supabase/config', (_req, res) => {
   res.json({
     url: supabaseUrl,
@@ -55,7 +56,102 @@ app.get('/api/supabase/config', (_req, res) => {
   });
 });
 
-// AI Natural Language Business Search & Cross-Border Matcher
+// Google Maps configuration endpoint for runtime key hydration
+app.get('/api/maps/config', (_req, res) => {
+  res.json({
+    apiKey: mapsApiKey,
+    configured: Boolean(mapsApiKey),
+  });
+});
+
+// Server-side Geocoding Proxy (avoids browser CORS issues & handles Tier 2 quota signals)
+app.post('/api/maps/geocode', async (req, res) => {
+  try {
+    const { address } = req.body;
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({ error: 'Address is required' });
+    }
+    if (!mapsApiKey) {
+      return res.status(503).json({ error: 'Google Maps API key not configured' });
+    }
+
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${encodeURIComponent(mapsApiKey)}`;
+    const upstream = await fetch(url);
+    const data = await upstream.json();
+
+    if (upstream.status === 429 || data?.status === 'OVER_QUERY_LIMIT' || data?.error?.status === 'RESOURCE_EXHAUSTED') {
+      return res.status(429).json({ error: 'quota_exceeded', code: 'RESOURCE_EXHAUSTED' });
+    }
+
+    if (data?.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
+      const top = data.results[0];
+      return res.json({
+        lat: top.geometry?.location?.lat,
+        lng: top.geometry?.location?.lng,
+        formattedAddress: top.formatted_address,
+        placeId: top.place_id,
+      });
+    }
+
+    return res.status(404).json({ error: data?.status || 'Address not found' });
+  } catch (err: any) {
+    console.error('Error in /api/maps/geocode:', err);
+    return res.status(500).json({ error: 'Geocoding request failed' });
+  }
+});
+
+// Server-side Routes API Proxy (computeRoutes v2)
+app.post('/api/maps/route-distance', async (req, res) => {
+  try {
+    const { origin, destination } = req.body;
+    if (!origin?.lat || !origin?.lng || !destination?.lat || !destination?.lng) {
+      return res.status(400).json({ error: 'Origin and destination coordinates are required' });
+    }
+    if (!mapsApiKey) {
+      return res.status(503).json({ error: 'Google Maps API key not configured' });
+    }
+
+    const upstream = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': mapsApiKey,
+        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: {
+          location: { latLng: { latitude: Number(origin.lat), longitude: Number(origin.lng) } },
+        },
+        destination: {
+          location: { latLng: { latitude: Number(destination.lat), longitude: Number(destination.lng) } },
+        },
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_AWARE',
+      }),
+    });
+
+    const data = await upstream.json();
+    if (upstream.status === 429 || data?.error?.status === 'RESOURCE_EXHAUSTED') {
+      return res.status(429).json({ error: 'quota_exceeded', code: 'RESOURCE_EXHAUSTED' });
+    }
+
+    const route = data?.routes?.[0];
+    if (!route) {
+      return res.status(404).json({ error: 'No driving route found between selected hubs' });
+    }
+
+    return res.json({
+      distanceMeters: route.distanceMeters,
+      duration: route.duration,
+      encodedPolyline: route.polyline?.encodedPolyline || null,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/maps/route-distance:', err);
+    return res.status(500).json({ error: 'Route calculation failed' });
+  }
+});
+
+// Smart Natural Language Business Search & Cross-Border Matcher
 app.post('/api/ai/natural-search', async (req, res) => {
   try {
     const { query, language = 'en', businessSummaries = [] } = req.body;
@@ -65,7 +161,6 @@ app.post('/api/ai/natural-search', async (req, res) => {
     }
 
     if (!ai) {
-      // Smart heuristic fallback when API key is not yet set
       return res.json({
         fallback: true,
         parsedIntent: {
@@ -76,7 +171,7 @@ app.post('/api/ai/natural-search', async (req, res) => {
       });
     }
 
-    const prompt = `You are AfriTrade AI, a Pan-African B2B Trade & Supplier Matchmaking Engine.
+    const prompt = `You are AfriTrade Smart Match, a Pan-African B2B Trade & Supplier Matchmaking Engine.
 The user wants to find African suppliers/businesses using this natural language query: "${query}"
 The user's preferred interface language is: "${language}".
 
@@ -113,7 +208,7 @@ Do not invent unverified certifications or capabilities. Only cite what is prese
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -124,8 +219,7 @@ Do not invent unverified certifications or capabilities. Only cite what is prese
       const parsed = JSON.parse(text);
       return res.json(parsed);
     } catch (modelErr: any) {
-      console.warn('Gemini model call failed (e.g. 503 high demand), falling back to rule-based matcher:', modelErr?.message);
-      // Smart rule-based extraction
+      console.warn('Model call failed in /api/ai/natural-search, falling back to rule-based matcher:', modelErr?.message);
       const q = query.toLowerCase();
       const matchedBusinesses = (businessSummaries || []).filter((b: any) => {
         const text = `${b.name} ${b.country} ${b.industry} ${(b.products || []).join(' ')} ${(b.countriesServed || []).join(' ')}`.toLowerCase();
@@ -139,7 +233,7 @@ Do not invent unverified certifications or capabilities. Only cite what is prese
           originCountry: q.includes('angola') ? 'Angola' : q.includes('kenya') ? 'Kenya' : q.includes('nigeria') ? 'Nigeria' : 'Pan-African',
           destinationCountry: q.includes('namibia') ? 'Namibia' : 'Cross-Border',
           mustBeVerified: true,
-          keyRequirements: ['Food-grade compliance', 'Guichet Único / National registry verification'],
+          keyRequirements: ['Food-grade compliance', 'National registry verification'],
         },
         matches: matchedBusinesses.map((b: any) => ({
           id: b.id,
@@ -153,22 +247,21 @@ Do not invent unverified certifications or capabilities. Only cite what is prese
   } catch (err: any) {
     console.error('Error in /api/ai/natural-search:', err);
     return res.status(500).json({
-      error: 'AI search processing failed',
+      error: 'Search processing failed',
       details: err?.message || String(err),
     });
   }
 });
 
-// AI WhatsApp Commercial Inquiry & RFQ Generator
+// WhatsApp Commercial Inquiry & RFQ Generator
 app.post('/api/ai/draft-whatsapp', async (req, res) => {
   try {
     const {
       businessName,
       businessCountry,
-      businessLanguage = 'en',
       buyerName = 'Commercial Buyer',
       buyerCountry = 'Pan-African Buyer',
-      inquiryType = 'quote', // quote | sample | distribution | export
+      inquiryType = 'quote',
       targetProduct = '',
       quantity = 'Wholesale volume',
       targetDestination = '',
@@ -181,7 +274,6 @@ app.post('/api/ai/draft-whatsapp', async (req, res) => {
     }
 
     if (!ai) {
-      // Heuristic fallback template
       const fallbackText = `Hello ${businessName},\n\nI discovered your verified profile on AfriTrade Trust. We are interested in sourcing ${targetProduct || 'your products'} for delivery to ${targetDestination || buyerCountry}.\n\nCould you please share your wholesale price quotation for ${quantity}, along with your Minimum Order Quantity (MOQ) and lead time?\n\nLooking forward to doing business,\n${buyerName}`;
       return res.json({ draftMessage: fallbackText, language: preferredLanguage });
     }
@@ -196,20 +288,10 @@ Context:
 - Target Product/Service: ${targetProduct}
 - Order Quantity: ${quantity}
 - Destination Port / City: ${targetDestination || buyerCountry}
-- Special Requirements (e.g. packaging, certifications, Incoterms): ${specificRequirements || 'Standard wholesale terms'}
-- Desired Message Language: ${preferredLanguage} (options: en=English, pt=Portuguese, fr=French, sw=Kiswahili, ar=Arabic)
+- Special Requirements: ${specificRequirements || 'Standard wholesale terms'}
+- Desired Message Language: ${preferredLanguage} (en=English, pt=Portuguese, fr=French, sw=Kiswahili, ar=Arabic)
 
-Generate a ready-to-send WhatsApp commercial message.
-Guidelines:
-1. Start with appropriate professional business greeting in the requested language (e.g., "Bom dia", "Bonjour", "Habari", "Salam Alaykum", or "Good day").
-2. Reference finding their verified listing on AfriTrade Trust.
-3. State the product, requested quantity, delivery location, and ask for:
-   - Wholesale unit price
-   - Minimum Order Quantity (MOQ)
-   - Lead time and Incoterms (e.g., FOB, CIF, or Ex-Works)
-   - Accepted payment terms (e.g. Letter of Credit, Mobile Money, Escrow)
-4. Keep it under 140 words so it reads cleanly on a mobile screen.
-5. Return JSON:
+Generate a ready-to-send WhatsApp commercial message under 140 words in JSON:
 {
   "draftMessage": string,
   "greeting": string,
@@ -218,7 +300,7 @@ Guidelines:
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -229,7 +311,7 @@ Guidelines:
       const parsed = JSON.parse(text);
       return res.json(parsed);
     } catch (modelErr: any) {
-      console.warn('Gemini draft-whatsapp fallback due to:', modelErr?.message);
+      console.warn('draft-whatsapp fallback:', modelErr?.message);
       const greetingMap: Record<string, string> = {
         pt: `Olá equipa comercial da ${businessName},`,
         en: `Hello sales team at ${businessName},`,
@@ -255,7 +337,7 @@ Guidelines:
   }
 });
 
-// AI Cross-Border Trade & Compliance Evaluator
+// Cross-Border Trade & Compliance Evaluator (with Google Search Grounding sources)
 app.post('/api/ai/trade-advisor', async (req, res) => {
   try {
     const { supplierCountry, buyerCountry, productCategory } = req.body;
@@ -264,73 +346,98 @@ app.post('/api/ai/trade-advisor', async (req, res) => {
       return res.status(400).json({ error: 'Missing trade parameters' });
     }
 
+    const buildFallback = () => ({
+      applicableAgreement: `${supplierCountry} - ${buyerCountry} AfCFTA Preferential Trade Protocol`,
+      tariffAdvantage: 'Eligible for preferential reduced or zero tariffs under AfCFTA Rules of Origin when certified.',
+      requiredDocuments: [
+        'AfCFTA Form B Certificate of Origin',
+        'Commercial Invoice with 6-digit Harmonized System (HS) Code',
+        'National Standards Quality Conformity Certificate',
+        'Road Consignment Note (CMR) or Port Bill of Lading',
+      ],
+      paymentSafetyAdvice: 'Use Pan-African Payment and Settlement System (PAPSS), AfriTrade Trade Escrow, or a Confirmed Letter of Credit.',
+      logisticsNote: `Transit between ${supplierCountry} and ${buyerCountry} governed by regional trade corridor customs rules.`,
+      buyerSafetyTips: [
+        'Verify company registration status with the national commercial registrar',
+        'Use escrow or documentary letters of credit for cross-border deposits',
+      ],
+      groundingSources: [] as Array<{ title: string; uri: string }>,
+    });
+
     if (!ai) {
-      return res.json({
-        tradeAgreement: 'AfCFTA (African Continental Free Trade Area)',
-        tariffStatus: '0% Preferential Duty with AfCFTA Certificate of Origin',
-        requiredDocs: [
-          'Certificate of Origin (AfCFTA Annex 2)',
-          'Commercial Invoice with HS Code',
-          'Packing List & Bill of Lading / Airway Bill',
-          'Standards Bureau Quality Certificate',
-        ],
-        paymentRecommendation: 'AfriTrade Escrow or Irrevocable Confirmed Letter of Credit (LC)',
-        logisticsNote: '3-10 days depending on corridor (Air/Road/Sea)',
-        buyerSafetyTips: ['Verify registration number on national commercial registry.'],
-      });
+      return res.json(buildFallback());
     }
 
-    const prompt = `You are a Senior Pan-African Trade Specialist advising on cross-border commercial transactions between two African nations.
+    const structuredPrompt = `You are a Senior Pan-African Trade Specialist advising on cross-border commercial transactions between two African nations.
 Trade Route:
 - Origin/Supplier Country: ${supplierCountry}
 - Destination/Buyer Country: ${buyerCountry}
 - Product Category: ${productCategory}
 
-Provide factual, practical guidance on:
-1. Applicable trade bloc (AfCFTA, SADC, ECOWAS, EAC, CEMAC, COMESA, or AMU) and expected tariff treatment.
-2. Required trade documentation (e.g., AfCFTA Certificate of Origin, Phytosanitary, National Standards certificate like KEBS, SONCAP, INAPEM, SABS, etc.).
-3. Recommended cross-border payment security methods (PAPSS - Pan-African Payment and Settlement System, Escrow, Mobile Money cross-border, or Bank L/C).
-4. Common logistical pitfalls or corridor bottlenecks to anticipate.
-
-Return JSON:
+Return STRICT JSON matching:
 {
-  "tradeAgreement": string,
-  "tariffStatus": string,
-  "requiredDocs": string[],
-  "paymentRecommendation": string,
+  "applicableAgreement": string,
+  "tariffAdvantage": string,
+  "requiredDocuments": string[],
+  "paymentSafetyAdvice": string,
   "logisticsNote": string,
   "buyerSafetyTips": string[]
 }`;
 
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+      const [structuredRes, searchGroundedRes] = await Promise.allSettled([
+        ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: structuredPrompt,
+          config: {
+            responseMimeType: 'application/json',
+          },
+        }),
+        ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: `Summarize official AfCFTA, SADC, ECOWAS, or EAC customs tariff and trade corridor updates between ${supplierCountry} and ${buyerCountry} for ${productCategory} exports in 2 sentences.`,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        }),
+      ]);
 
-      const parsed = JSON.parse(response.text || '{}');
+      let parsed = buildFallback();
+      if (structuredRes.status === 'fulfilled' && structuredRes.value.text) {
+        const raw = JSON.parse(structuredRes.value.text);
+        parsed = {
+          applicableAgreement: raw.applicableAgreement || raw.tradeAgreement || parsed.applicableAgreement,
+          tariffAdvantage: raw.tariffAdvantage || raw.tariffStatus || parsed.tariffAdvantage,
+          requiredDocuments: Array.isArray(raw.requiredDocuments)
+            ? raw.requiredDocuments
+            : Array.isArray(raw.requiredDocs)
+            ? raw.requiredDocs
+            : parsed.requiredDocuments,
+          paymentSafetyAdvice: raw.paymentSafetyAdvice || raw.paymentRecommendation || parsed.paymentSafetyAdvice,
+          logisticsNote: raw.logisticsNote || parsed.logisticsNote,
+          buyerSafetyTips: Array.isArray(raw.buyerSafetyTips) ? raw.buyerSafetyTips : parsed.buyerSafetyTips,
+          groundingSources: [],
+        };
+      }
+
+      if (searchGroundedRes.status === 'fulfilled') {
+        const chunks = searchGroundedRes.value.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        const webSources = chunks
+          .filter((c: any) => c.web?.uri)
+          .map((c: any) => ({
+            title: c.web.title || c.web.uri,
+            uri: c.web.uri,
+          }));
+        parsed.groundingSources = webSources;
+        if (searchGroundedRes.value.text && webSources.length > 0) {
+          parsed.logisticsNote = `${parsed.logisticsNote} ${searchGroundedRes.value.text.trim()}`;
+        }
+      }
+
       return res.json(parsed);
     } catch (modelErr: any) {
-      console.warn('Gemini trade-advisor fallback:', modelErr?.message);
-      return res.json({
-        tradeAgreement: 'AfCFTA Preferential Trade Protocol & Regional Economic Community',
-        tariffStatus: 'Eligible for preferential reduced/zero tariffs under AfCFTA rules of origin',
-        requiredDocs: [
-          'AfCFTA Form B Certificate of Origin',
-          'Commercial Invoice with 6-digit Harmonized System (HS) Code',
-          'National Standards Quality Conformity Certificate',
-          'Road Consignment Note (CMR) or Port Bill of Lading',
-        ],
-        paymentRecommendation: 'AfriTrade Escrow, PAPSS (Pan-African Payment System), or Confirmed Letter of Credit',
-        logisticsNote: `Transit between ${supplierCountry} and ${buyerCountry} governed by regional trade corridor regulations.`,
-        buyerSafetyTips: [
-          'Verify company registration status in official government gazette / registrar',
-          'Never transfer unsecured cash advance without physical warehouse inspection',
-        ],
-      });
+      console.warn('trade-advisor fallback:', modelErr?.message);
+      return res.json(buildFallback());
     }
   } catch (err: any) {
     console.error('Error in /api/ai/trade-advisor:', err);
@@ -339,6 +446,110 @@ Return JSON:
       details: err?.message || String(err),
     });
   }
+});
+
+// Google Maps Grounding Endpoint (with Places API (New) fallback when Gemini quota is exhausted)
+app.post('/api/ai/maps-grounding', async (req, res) => {
+  const { query, lat, lng } = req.body;
+  if (!query || typeof query !== 'string') {
+    return res.status(400).json({ error: 'Query is required' });
+  }
+
+  // Try Gemini Grounding with Google Maps first if key is available
+  if (ai) {
+    try {
+      const config: any = {
+        tools: [{ googleMaps: {} }],
+      };
+
+      if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+        config.toolConfig = {
+          retrievalConfig: {
+            latLng: { latitude: lat, longitude: lng },
+          },
+        };
+      }
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: query,
+        config,
+      });
+
+      const metadata = response.candidates?.[0]?.groundingMetadata;
+      const chunks = metadata?.groundingChunks || [];
+      const mapsSources = chunks
+        .filter((c: any) => c.maps?.uri)
+        .map((c: any) => ({
+          title: c.maps.title || 'View on Google Maps',
+          uri: c.maps.uri,
+          placeId: c.maps.placeId || undefined,
+          reviewSnippets: c.maps.placeAnswerSources?.reviewSnippets || [],
+        }));
+
+      return res.json({
+        text: response.text || '',
+        mapsSources,
+        googleMapsWidgetContextToken: metadata?.googleMapsWidgetContextToken || null,
+      });
+    } catch (geminiErr: any) {
+      console.warn('Gemini maps-grounding unavailable, trying Places API (New):', geminiErr?.message);
+    }
+  }
+
+  // Fallback to Places API (New) server-side search for verified ports/hubs
+  if (mapsApiKey) {
+    try {
+      const placesBody: any = {
+        textQuery: query,
+        maxResultCount: 5,
+      };
+      if (typeof lat === 'number' && typeof lng === 'number' && !Number.isNaN(lat) && !Number.isNaN(lng)) {
+        placesBody.locationBias = {
+          circle: {
+            center: { latitude: lat, longitude: lng },
+            radius: 50000.0,
+          },
+        };
+      }
+
+      const placesRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': mapsApiKey,
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.googleMapsUri,places.id',
+        },
+        body: JSON.stringify(placesBody),
+      });
+
+      const placesData = await placesRes.json();
+      if (placesRes.status === 429 || placesData?.error?.status === 'RESOURCE_EXHAUSTED') {
+        return res.status(429).json({ error: 'quota_exceeded', code: 'RESOURCE_EXHAUSTED' });
+      }
+
+      if (Array.isArray(placesData?.places) && placesData.places.length > 0) {
+        const mapsSources = placesData.places
+          .filter((p: any) => p.googleMapsUri)
+          .map((p: any) => ({
+            title: p.displayName?.text || p.formattedAddress || 'Commercial Hub',
+            uri: p.googleMapsUri,
+            placeId: p.id,
+          }));
+        return res.json({
+          text: `Verified freight, port, and logistics infrastructure near the selected trade hub:`,
+          mapsSources,
+        });
+      }
+    } catch (placesErr: any) {
+      console.warn('Places searchText fallback failed:', placesErr?.message);
+    }
+  }
+
+  return res.json({
+    text: 'Regional freight terminals, ports, and customs bonded warehouses support commercial B2B shipments along this trade corridor.',
+    mapsSources: [],
+  });
 });
 
 // Vite middleware or static serving
@@ -410,6 +621,7 @@ if (process.env.NODE_ENV === 'production') {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
+      'import.meta.env.VITE_GOOGLE_MAPS_API_KEY': JSON.stringify(mapsApiKey),
     },
     server: {
       middlewareMode: true,
@@ -424,4 +636,3 @@ const PORT = 3000;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`AfriTrade Trust Server running on http://0.0.0.0:${PORT}`);
 });
-
